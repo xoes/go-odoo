@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"github.com/kolo/xmlrpc"
-	"github.com/skilld-labs/go-odoo/types"
+	"github.com/xoes/go-odoo/types"
 )
 
 type Client struct {
@@ -62,6 +62,7 @@ func (c *Client) GetReport(model string, ids []int64) (map[string]interface{}, e
 	return report, client.Call("render_report", []interface{}{c.Session.DbName, c.Session.UID, c.Session.Password, (*fields)[0].ReportName, ids}, &report)
 }
 
+// Low-level functions
 func (c *Client) Create(model string, args []interface{}, elem interface{}) error {
 	return c.DoRequest("create", model, args, nil, elem)
 }
@@ -104,6 +105,7 @@ func (c *Client) DoRequest(method string, model string, args []interface{}, opti
 	return c.client.Call("execute_kw", []interface{}{c.Session.DbName, c.Session.UID, c.Session.Password, model, method, args, options}, elem)
 }
 
+// Higher-level functions for data retrival
 func (c *Client) getIdsByName(model string, name string) ([]int64, error) {
 	var ids []int64
 	err := c.Search(model, []interface{}{[]string{"name", "=", name}}, nil, &ids)
@@ -130,6 +132,7 @@ func (c *Client) getAll(model string, elem interface{}) error {
 	return err
 }
 
+// Higher-level functions for data manipulation
 func (c *Client) create(model string, fields map[string]interface{}, relation *types.Relations) (int64, error) {
 	var id int64
 	if relation != nil {
