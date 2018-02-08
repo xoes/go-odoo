@@ -48,13 +48,15 @@ import "github.com/xoes/go-odoo/api"
 You have to construct a new client.
 
 ```go
-	c, err := api.NewClient("http://localhost:8069", nil)
+	c := api.Config{"http://localhost:8069", nil, nil}
+	client, err := c.NewClient()
 	if err != nil {
 		fmt.Println(err.Error())
 	}
-	err = c.Login("dbName", "Admin", "password")
+	s := api.Session{"dbName", "user", "password"}
+	err = c.Login(s)
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Prinln(err.Error())
 	}
 ```
 

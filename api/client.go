@@ -8,78 +8,100 @@ import (
 	"github.com/xoes/go-odoo/types"
 )
 
-type Client struct {
-	client    *xmlrpc.Client
-	URI       string
-	Transport http.RoundTripper
-	Session   struct {
-		DbName   string
-		Admin    string
-		Password string
-		UID      int
-	}
+
+type Config struct {
+	HostURL   		string
+	AdminPassword   string
+	Transport 		http.RoundTripper
+	Session
 }
 
-func NewClient(uri string, transport http.RoundTripper) (*Client, error) {
-	c, err := xmlrpc.NewClient(uri+"/xmlrpc/2/object", transport)
+type Session struct {
+	DbName   string
+	Username string
+	Password string
+	UserID   int
+}
+
+type CreateDatabaseConfig struct {
+	dbName string
+	demo bool
+	lang string
+	userPassword string
+	login string
+	countryCode string
+}
+
+func (c *Config) NewClient() (*xmlrpc.Client, error) {
+	client, err := xmlrpc.NewClient(c.HostURL + "/xmlrpc/2/object", c.Transport)
 	if err != nil {
 		return nil, err
 	}
-	client := &Client{client: c, URI: uri, Transport: transport}
 	return client, err
 }
 
-func (c *Client) Login(dbName string, admin string, password string) error {
+func (c *Config) Login(s Session) error {
 	var uid int
-	uriTemp := c.URI + "/xmlrpc/2/common"
-	cTemp, err := xmlrpc.NewClient(uriTemp, c.Transport)
+	endpointURL := c.HostURL + "/xmlrpc/2/common"
+	client, err := xmlrpc.NewClient(endpointURL, c.Transport)
 	if err != nil {
 		return err
 	}
-	clientTemp := &Client{client: cTemp, URI: uriTemp, Transport: c.Transport}
-	err = clientTemp.client.Call("authenticate", []interface{}{dbName, admin, password, ""}, &uid)
+	err = client.Call("authenticate", []interface{}{s.DbName, s.Username, s.Password, ""}, &uid)
 	if err != nil {
 		return err
 	}
-	c.Session.DbName = dbName
-	c.Session.Admin = admin
-	c.Session.Password = password
-	c.Session.UID = uid
+	s.UserID = uid
+	c.Session = s
 	return err
 }
 
-func (c *Client) GetReport(model string, ids []int64) (map[string]interface{}, error) {
-	client, err := xmlrpc.NewClient(c.URI+"/xmlrpc/2/report", c.Transport)
+func (c *Config) CreateDatabase(dbConfig *CreateDatabaseConfig) error {
+	var reply bool
+	endpointURL := c.HostURL + "/xmlrpc/2/db"
+	client, err := xmlrpc.NewClient(endpointURL, c.Transport)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var report map[string]interface{}
-	reportService := NewIrActionsReportService(c)
-	fields, err := reportService.GetByField("model", model)
+	err = client.Call("create_database", []interface{}{dbConfig}, &reply)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return report, client.Call("render_report", []interface{}{c.Session.DbName, c.Session.UID, c.Session.Password, (*fields)[0].ReportName, ids}, &report)
+	return err
+}
+
+func (c *Config) DropDatabase(dbName string) error {
+	var reply bool
+	endpointURL := c.HostURL + "/xmlrpc/2/db"
+	client, err := xmlrpc.NewClient(endpointURL, c.Transport)
+	if err != nil {
+		return err
+	}
+	err = client.Call("drop", []interface{}{c.AdminPassword, dbName}, &reply)
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 // Low-level functions
-func (c *Client) Create(model string, args []interface{}, elem interface{}) error {
+func (c *Config) Create(model string, args []interface{}, elem interface{}) error {
 	return c.DoRequest("create", model, args, nil, elem)
 }
 
-func (c *Client) Update(model string, args []interface{}) error {
+func (c *Config) Update(model string, args []interface{}) error {
 	return c.DoRequest("write", model, args, nil, nil)
 }
 
-func (c *Client) Delete(model string, args []interface{}) error {
+func (c *Config) Delete(model string, args []interface{}) error {
 	return c.DoRequest("unlink", model, args, nil, nil)
 }
 
-func (c *Client) Search(model string, args []interface{}, options interface{}, elem interface{}) error {
+func (c *Config) Search(model string, args []interface{}, options interface{}, elem interface{}) error {
 	return c.DoRequest("search", model, args, options, elem)
 }
 
-func (c *Client) Read(model string, args []interface{}, options interface{}, elem interface{}) error {
+func (c *Config) Read(model string, args []interface{}, options interface{}, elem interface{}) error {
 	ne := elem.(types.Type).NilableType_()
 	err := c.DoRequest("read", model, args, options, ne)
 	if err == nil {
@@ -88,7 +110,7 @@ func (c *Client) Read(model string, args []interface{}, options interface{}, ele
 	return err
 }
 
-func (c *Client) SearchRead(model string, args []interface{}, options interface{}, elem interface{}) error {
+func (c *Config) SearchRead(model string, args []interface{}, options interface{}, elem interface{}) error {
 	ne := elem.(types.Type).NilableType_()
 	err := c.DoRequest("search_read", model, args, options, ne)
 	if err == nil {
@@ -97,43 +119,47 @@ func (c *Client) SearchRead(model string, args []interface{}, options interface{
 	return err
 }
 
-func (c *Client) SearchCount(model string, args []interface{}, elem interface{}) error {
+func (c *Config) SearchCount(model string, args []interface{}, elem interface{}) error {
 	return c.DoRequest("search_count", model, args, nil, elem)
 }
 
-func (c *Client) DoRequest(method string, model string, args []interface{}, options interface{}, elem interface{}) error {
-	return c.client.Call("execute_kw", []interface{}{c.Session.DbName, c.Session.UID, c.Session.Password, model, method, args, options}, elem)
+func (c *Config) DoRequest(method string, model string, args []interface{}, options interface{}, elem interface{}) error {
+	client, err := c.NewClient()
+	if err != nil {
+		return err
+	}
+	return client.Call("execute_kw", []interface{}{c.Session.DbName, c.Session.UserID, c.Session.Password, model, method, args, options}, elem)
 }
 
 // Higher-level functions for data retrival
-func (c *Client) getIdsByName(model string, name string) ([]int64, error) {
+func (c *Config) getIdsByName(model string, name string) ([]int64, error) {
 	var ids []int64
 	err := c.Search(model, []interface{}{[]string{"name", "=", name}}, nil, &ids)
 	return ids, err
 }
 
-func (c *Client) getByIds(model string, ids []int64, elem interface{}) error {
+func (c *Config) getByIds(model string, ids []int64, elem interface{}) error {
 	err := c.Read(model, []interface{}{ids}, nil, elem)
 	return err
 }
 
-func (c *Client) getByName(model string, name string, elem interface{}) error {
+func (c *Config) getByName(model string, name string, elem interface{}) error {
 	err := c.SearchRead(model, []interface{}{[]interface{}{[]string{"name", "=", name}}}, nil, elem)
 	return err
 }
 
-func (c *Client) getByField(model string, field string, value string, elem interface{}) error {
+func (c *Config) getByField(model string, field string, value string, elem interface{}) error {
 	err := c.SearchRead(model, []interface{}{[]interface{}{[]string{field, "=", value}}}, nil, elem)
 	return err
 }
 
-func (c *Client) getAll(model string, elem interface{}) error {
+func (c *Config) getAll(model string, elem interface{}) error {
 	err := c.SearchRead(model, []interface{}{[]interface{}{}}, nil, elem)
 	return err
 }
 
 // Higher-level functions for data manipulation
-func (c *Client) create(model string, fields map[string]interface{}, relation *types.Relations) (int64, error) {
+func (c *Config) create(model string, fields map[string]interface{}, relation *types.Relations) (int64, error) {
 	var id int64
 	if relation != nil {
 		types.HandleRelations(&fields, relation)
@@ -142,7 +168,7 @@ func (c *Client) create(model string, fields map[string]interface{}, relation *t
 	return id, err
 }
 
-func (c *Client) update(model string, ids []int64, fields map[string]interface{}, relation *types.Relations) error {
+func (c *Config) update(model string, ids []int64, fields map[string]interface{}, relation *types.Relations) error {
 	if relation != nil {
 		types.HandleRelations(&fields, relation)
 	}
@@ -150,6 +176,6 @@ func (c *Client) update(model string, ids []int64, fields map[string]interface{}
 	return err
 }
 
-func (c *Client) delete(model string, ids []int64) error {
+func (c *Config) delete(model string, ids []int64) error {
 	return c.Delete(model, []interface{}{ids})
 }
